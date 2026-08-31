@@ -1,0 +1,27 @@
+# Dependencies
+node_modules
+
+# Environment secrets
+.env
+.env.local
+.env.*
+
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+
+# Documentation
+README.md
+*.md

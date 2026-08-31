@@ -1,0 +1,56 @@
+# ================================================
+# DevOps Onboarding Week 2 — docker-compose
+# App + MySQL + shared network + named volume
+# ================================================
+
+services:
+
+  # MySQL Database
+  db:
+    image: postgres:16
+    container_name: hello-api-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hello_api_db
+      POSTGRES_USER: app-user
+      POSTGRES_PASSWORD: rootpassword123
+    volumes:
+      - postgres-data:/var/lib/postgresql/data   # named volume
+    networks:
+      - hello_api_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app-user -d hello_api_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Node.js App
+  app:
+    image: hello-api-new:slim
+    container_name: hello-api-new
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: app-user
+      DB_PASSWORD: wrongpassword123
+      DB_NAME: hello-api-db
+    networks:
+      - hello_api_net
+    depends_on:
+      db:
+        condition: service_healthy
+
+# Named volume — data persists between container restarts
+volumes:
+  postgres-data:
+    driver: local
+
+# Custom network — containers find each other by name
+networks:
+  hello_api_net:
+    driver: bridge
