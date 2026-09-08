@@ -16,6 +16,8 @@ services:
       POSTGRES_PASSWORD: rootpassword123
     volumes:
       - postgres-data:/var/lib/postgresql/data   # named volume
+    ports:
+      - "5432:5432"
     networks:
       - hello_api_net
     healthcheck:
@@ -37,7 +39,7 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: app-user
-      DB_PASSWORD: wrongpassword123
+      DB_PASSWORD: rootpassword123
       DB_NAME: hello-api-db
     networks:
       - hello_api_net

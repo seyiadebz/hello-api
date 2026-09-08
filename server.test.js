@@ -5,7 +5,7 @@ describe('Hello API', () => {
 
     test('environment has a PORT variable', () => {
         const port = process.env.PORT || 3000;
-        expect(typeof port).toBe('number' || 'string');
+        expect(['number', 'string']).toContain(typeof port);
     });
 
     test('NODE_ENV is set', () => {
