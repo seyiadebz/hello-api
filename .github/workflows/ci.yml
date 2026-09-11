@@ -44,6 +44,28 @@ jobs:
       # Step 5 — Run tests
       - name: Run tests
         run: npm test
+  # ──────────────────────────────────────────────
+  # Job 2 — Manual Approval Gate
+  # ──────────────────────────────────────────────
+  approve:
+    name: Manual Approval
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    environment: production          # ← this creates an approval gate
+
+    steps:
+      - name: Approved
+        run: echo "Deployment approved"
+
+  # ──────────────────────────────────────────────
+  # Job 3 — Build and Push (now needs approval)
+  # ──────────────────────────────────────────────
+  build:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    needs: approve                   # ← now waits for approval, not test
+
 
   # ──────────────────────────────────────────────
   # Job 2 — Build and Push Docker Image

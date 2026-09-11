@@ -12,8 +12,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: hello_api_db
-      POSTGRES_USER: app-user
-      POSTGRES_PASSWORD: rootpassword123
+      POSTGRES_USER: ${{ Secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ Secrets.POSTGRES_PASSWORD }}
     volumes:
       - postgres-data:/var/lib/postgresql/data   # named volume
     ports:
@@ -38,8 +38,8 @@ services:
       NODE_ENV: production
       DB_HOST: db
       DB_PORT: 5432
-      DB_USER: app-user
-      DB_PASSWORD: rootpassword123
+      DB_USER: ${{ Secrets.DB_USER }}
+      DB_PASSWORD: ${{ Secrets.DB_PASSWORD }}
       DB_NAME: hello-api-db
     networks:
       - hello_api_net
