@@ -28,7 +28,7 @@ services:
 
   # Node.js App
   app:
-    image: ${DOCKERUSERNAME}/hello-api-new:${IMAGE_TAG:-latest}
+    image: ${APP_IMAGE:?The deployment must provide APP_IMAGE}
     container_name: hello-api-new
     restart: unless-stopped
     ports:
