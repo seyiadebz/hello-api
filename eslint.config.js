@@ -1,14 +1,21 @@
-// eslint.config.js — ESLint v9 flat config
+// eslint.config.js
+// ESLint v9 flat config format
 
 const js = require('@eslint/js');
 
 module.exports = [
+    // Apply recommended rules
     js.configs.recommended,
+
     {
+        // Files to lint
         files: ['**/*.js'],
+
+        // Tell ESLint what globals exist in each environment
         languageOptions: {
             ecmaVersion: 2021,
             globals: {
+                // Node.js globals
                 require:    'readonly',
                 module:     'readonly',
                 exports:    'readonly',
@@ -16,6 +23,8 @@ module.exports = [
                 __dirname:  'readonly',
                 __filename: 'readonly',
                 console:    'readonly',
+
+                // Jest globals
                 describe:   'readonly',
                 test:       'readonly',
                 expect:     'readonly',
@@ -26,6 +35,8 @@ module.exports = [
                 afterAll:   'readonly'
             }
         },
+
+        // Your custom rules
         rules: {
             'no-unused-vars': 'warn',
             'no-console':     'off'
