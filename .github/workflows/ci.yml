@@ -1,11 +1,11 @@
 # ================================================
-# Hello API — CI Pipeline
-# Week 3 DevOps Onboarding
+# Hello API — CI/CD Pipeline
+# Week 5 — Docker Hub + EC2 deployment
 # ================================================
 
-name: CI Pipeline
+name: Hello API CI/CD
 
-# Trigger on push to main and pull requests
+# Test pull requests to main and pushes to main.
 on:
   push:
     branches: [main]
@@ -13,81 +13,175 @@ on:
     branches: [main]
 
 jobs:
-
-  # ──────────────────────────────────────────────
-  # Job 1 — Lint and Test
-  # ──────────────────────────────────────────────
+  # ==========================================
+  # Job 1 — Lint and test
+  # ==========================================
   test:
     name: Lint and Test
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1 — Check out your code
-      - name: Checkout code
+      # Get the repository files on the GitHub runner.
+      - name: Check out code
         uses: actions/checkout@v4
 
-      # Step 2 — Install Node.js
+      # Install the Node.js version used by the application.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: npm
 
-      # Step 3 — Install dependencies
+      # Install exactly the versions recorded in package-lock.json.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # Step 4 — Run linter
-      - name: Lint code
+      # Stop the workflow if linting finds an error.
+      - name: Run linter
         run: npm run lint
 
-      # Step 5 — Run tests
+      # Stop the workflow if tests fail.
       - name: Run tests
         run: npm test
 
-  # ──────────────────────────────────────────────
-  # Job 2 — Build and Push Docker Image
-  # Only runs after test job passes
-  # Only runs on push to main (not PRs)
-  # ──────────────────────────────────────────────
+  # ==========================================
+  # Job 2 — Build and push the image
+  # Runs only after tests pass on a push to main.
+  # ==========================================
   build:
-    name: Build and Push Image
+    name: Build and Push to Docker Hub
     runs-on: ubuntu-latest
-    needs: test                    # waits for test job
-    if: github.ref == 'refs/heads/main'   # only on main branch
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      # Step 1 — Check out code
-      - name: Checkout code
+      # Get the source code used to build the image.
+      - name: Check out code
         uses: actions/checkout@v4
 
-      # Step 2 — Set up Docker Buildx
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Step 3 — Login to Docker Hub
-      - name: Login to Docker Hub
+      # Authenticate to Docker Hub using GitHub Secrets.
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Step 4 — Build and push image
-      # Tagged with both 'latest' and the git commit SHA
+      # Build and push a unique SHA tag plus the moving latest tag.
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/hello-api-new:latest
-            ${{ secrets.DOCKER_USERNAME }}/hello-api-new:${{ github.sha }}
-
-      # Step 5 — Print image digest for verification
-      - name: Print image info
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          IMAGE_TAG: sha-${{ github.sha }}
         run: |
-          echo "Image pushed successfully"
-          echo "Tags:"
-          echo "  ${{ secrets.DOCKER_USERNAME }}/hello-api-new:latest"
-          echo "  ${{ secrets.DOCKER_USERNAME }}/hello-api-new:${{ github.sha }}"
+          set -euo pipefail
+
+          # Build the full image names without passing them as job outputs.
+          IMAGE="${DOCKER_USERNAME}/hello-api-new:${IMAGE_TAG}"
+          LATEST_IMAGE="${DOCKER_USERNAME}/hello-api-new:latest"
+
+          # Use the previous latest image as a build cache when available.
+          docker pull "$LATEST_IMAGE" || true
+
+          # Build the application image with both tags.
+          docker build \
+            --pull \
+            --cache-from "$LATEST_IMAGE" \
+            --tag "$IMAGE" \
+            --tag "$LATEST_IMAGE" \
+            .
+
+          # Publish the immutable commit tag and the latest alias.
+          docker push "$IMAGE"
+          docker push "$LATEST_IMAGE"
+
+          # Print the tag used for this deployment.
+          echo "Published image tag: ${IMAGE_TAG}"
+
+  # ==========================================
+  # Job 3 — Deploy the image to EC2
+  # Runs only after the build succeeds on main.
+  # ==========================================
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    # Configure required reviewers on this GitHub environment
+    # if you want approval before production deployment.
+    environment: production
+
+    steps:
+      # Connect to EC2 and run the deployment commands remotely.
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+
+        # Pass the image coordinates and Docker Hub credentials to EC2.
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          IMAGE_TAG: sha-${{ github.sha }}
+
+        with:
+          # EC2 connection settings are stored as GitHub Secrets.
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 120s
+
+          # Send only the values the remote script needs.
+          envs: DOCKER_USERNAME,DOCKER_PASSWORD,IMAGE_TAG
+
+          # These commands run on EC2, not on the GitHub runner.
+          script: |
+            # Stop the deployment if a command fails.
+            set -e
+
+            # Use the existing directory containing docker-compose.yml and .env.
+            APP_DIR="$HOME/hello-api"
+
+            # Construct the exact image tag built by the previous job.
+            NEW_IMAGE="${DOCKER_USERNAME}/hello-api-new:${IMAGE_TAG}"
+
+            # Move into the existing Compose project directory.
+            cd "$APP_DIR"
+
+            # Stop early if the required EC2 files are missing.
+            test -f docker-compose.yml
+            test -f .env
+
+            # Remove the temporary Docker Hub login when the script exits.
+            trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+            # Authenticate so EC2 can pull the image from Docker Hub.
+            printf '%s' "$DOCKER_PASSWORD" \
+              | docker login --username "$DOCKER_USERNAME" --password-stdin
+
+            # Make Compose use this commit-specific image.
+            export APP_IMAGE="$NEW_IMAGE"
+
+            # Validate the Compose configuration before changing containers.
+            docker compose config --quiet
+
+            # Pull the new image, then replace only the API container.
+            docker compose pull app
+            docker compose up -d --no-build app
+
+            # Wait for the API health endpoint to return HTTP 200.
+            for attempt in $(seq 1 10); do
+              HTTP_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+                http://127.0.0.1:3000/health || true)"
+
+              if [ "$HTTP_STATUS" = "200" ]; then
+                echo "Health check passed."
+                docker compose ps
+                exit 0
+              fi
+
+              echo "Health check attempt ${attempt}/10 returned ${HTTP_STATUS}."
+              sleep 3
+            done
+
+            # Show service logs to help diagnose a failed deployment.
+            docker compose logs --no-color --tail=50 app db
+            exit 1
 
