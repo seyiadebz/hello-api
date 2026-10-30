@@ -173,6 +173,20 @@ jobs:
 
               if [ "$HTTP_STATUS" = "200" ]; then
                 echo "Health check passed."
+
+                # Save the verified image so later Compose commands use this release.
+                if grep -q '^APP_IMAGE=' .env; then
+
+                # Replace the existing image reference.
+                sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
+                else
+
+                # Add the image reference if this is the first deployment.
+                printf '\nAPP_IMAGE=%s\n' "$APP_IMAGE" >> .env
+                fi
+
+                # Confirm the deployed image tag was saved.
+                echo "Saved deployed image to .env: $APP_IMAGE"
                 docker compose ps
                 exit 0
               fi

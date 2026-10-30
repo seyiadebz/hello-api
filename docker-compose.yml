@@ -1,72 +1,58 @@
 # ================================================
-# Hello API — Production Docker Compose
-# App + PostgreSQL + persistent database volume
+# DevOps Onboarding Week 2 — docker-compose
+# App + MySQL + shared network + named volume
 # ================================================
 
 services:
-  # PostgreSQL database used by the API.
+
+  # MySQL Database
   db:
     image: postgres:16
     container_name: hello-api-db
     restart: unless-stopped
-
-    # Load database settings from the EC2 .env file.
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the EC2 .env file}
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the EC2 .env file}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the EC2 .env file}
-
-    # Keep database data when containers are replaced.
+      POSTGRES_DB: hello_api_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-    # The app connects to PostgreSQL over the Compose network.
-    # The database port is not published to the public host network.
+      - postgres-data:/var/lib/postgresql/data   # named volume
+    ports:
+      - "5432:5432"
     networks:
       - hello_api_net
-
-    # Wait for PostgreSQL to accept connections before starting the app.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U app-user -d hello_api_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Node.js API container pulled from Docker Hub.
+  # Node.js App
   app:
-    # The deploy workflow sets APP_IMAGE to the commit-specific image.
-    image: ${APP_IMAGE:?The deployment workflow must provide APP_IMAGE}
+    image: ${DOCKERUSERNAME}/hello-api-new:${IMAGE_TAG:-latest}
     container_name: hello-api-new
     restart: unless-stopped
-
-    # Publish the API on EC2 port 3000.
     ports:
       - "3000:3000"
-
-    # Pass application settings into the container.
     environment:
-      PORT: "3000"
+      PORT: 3000
       NODE_ENV: production
       DB_HOST: db
-      DB_PORT: "5432"
-      DB_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the EC2 .env file}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the EC2 .env file}
-      DB_NAME: ${POSTGRES_DB:?Set POSTGRES_DB in the EC2 .env file}
-
+      DB_PORT: 5432
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: hello-api-db
     networks:
       - hello_api_net
-
-    # Start the API after the database passes its health check.
     depends_on:
       db:
         condition: service_healthy
 
-# Preserve PostgreSQL data across container updates.
+# Named volume — data persists between container restarts
 volumes:
   postgres-data:
     driver: local
 
-# Allow the API to reach PostgreSQL by the service name "db".
+# Custom network — containers find each other by name
 networks:
   hello_api_net:
     driver: bridge
