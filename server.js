@@ -25,7 +25,7 @@ db.connect((err, client, release) => {
 
 app.get('/', (req, res) => {
     res.json({
-        message:  'Hello from inside a container',
+        message:  'Bonjour from inside a container',
         hostname: require('os').hostname(),
         time:     new Date().toISOString()
     });
