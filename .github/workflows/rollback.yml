@@ -1,0 +1,125 @@
+# ================================================
+# Hello API — Manual rollback workflow
+# Restores a previously published app image on EC2
+# ================================================
+
+name: Roll Back Hello API
+
+# This workflow runs only when you manually start it.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Previously working tag, such as sha-<full-commit-SHA>"
+        required: true
+        type: string
+
+jobs:
+  # ==========================================
+  # Roll back only the app service on EC2
+  # ==========================================
+  rollback:
+    name: Roll Back App on EC2
+    runs-on: ubuntu-latest
+
+    # Only allow rollback runs from main.
+    if: github.ref == 'refs/heads/main'
+
+    # Configure reviewers in this GitHub environment if rollback approval is desired.
+    environment: production
+
+    steps:
+      # Connect to EC2 and run the rollback commands there.
+      - name: Pull and run the selected image
+        uses: appleboy/ssh-action@v1.0.3
+
+        # Pass the selected image tag and Docker Hub credentials to EC2.
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+
+        with:
+          # EC2 connection details are stored in GitHub Secrets.
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 120s
+
+          # Forward only these values to the remote script.
+          envs: DOCKER_USERNAME,DOCKER_PASSWORD,IMAGE_TAG
+
+          # These commands run on EC2, not on the GitHub runner.
+          script: |
+            # Stop if a required command fails.
+            set -e
+
+            # Accept a full SHA tag, optionally prefixed with "sha-".
+            if ! printf '%s\n' "$IMAGE_TAG" | grep -Eq '^(sha-)?[0-9a-f]{40}$'; then
+              echo "Invalid tag. Enter a full 40-character commit SHA, optionally prefixed with sha-."
+              exit 1
+            fi
+
+            # Form the complete Docker Hub image reference.
+            APP_IMAGE="${DOCKER_USERNAME}/hello-api-new:${IMAGE_TAG}"
+
+            # Use the existing EC2 directory containing Compose and .env.
+            cd "$HOME/hello-api"
+
+            # Log out of Docker Hub when the remote script exits.
+            trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+            # Authenticate so EC2 can pull a private Docker Hub image.
+            printf '%s' "$DOCKER_PASSWORD" \
+              | docker login --username "$DOCKER_USERNAME" --password-stdin
+
+            # Make Compose use the selected previous image.
+            export APP_IMAGE
+
+            # Validate the EC2 Compose configuration before changing containers.
+            docker compose config --quiet
+
+            # Download the selected image from Docker Hub.
+            docker compose pull app
+
+            # Replace only the app container; leave PostgreSQL and its volume alone.
+            docker compose up -d --no-build app
+
+            # Wait for the app health endpoint to return HTTP 200.
+            HEALTHY=false
+            for attempt in $(seq 1 10); do
+              HTTP_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+                http://127.0.0.1:3000/health || true)"
+
+              if [ "$HTTP_STATUS" = "200" ]; then
+                HEALTHY=true
+                break
+              fi
+
+              echo "Health check attempt ${attempt}/10 returned ${HTTP_STATUS}."
+              sleep 3
+            done
+
+            # Show app and database logs if the selected image is unhealthy.
+            if [ "$HEALTHY" != "true" ]; then
+              docker compose logs --no-color --tail=50 app db
+              exit 1
+            fi
+
+            # Save the now-verified rollback image for future Compose commands.
+            touch .env
+            umask 077
+
+            if grep -q '^APP_IMAGE=' .env; then
+              # Replace the previously recorded image.
+              sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${APP_IMAGE}|" .env
+            else
+              # Record the image if this is the first saved release.
+              printf '\nAPP_IMAGE=%s\n' "$APP_IMAGE" >> .env
+            fi
+
+            # Keep the EC2 environment file private.
+            chmod 600 .env
+
+            # Show the running services after the rollback.
+            docker compose ps
