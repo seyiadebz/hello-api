@@ -32,11 +32,20 @@ app.get('/', (req, res) => {
 });
 
 // AFTER — deliberately broken health check
-app.get('/health', (req, res) => {
-    res.status(500).json({
-        status:  'unhealthy',
-        message: 'Intentional break to test rollback'
-    });
+app.get('/health', async (req, res) => {
+    try {
+        await db.query('SELECT 1');
+        res.status(200).json({
+            status:   'ok',
+            database: 'connected'
+        });
+    } catch (err) {
+        res.status(500).json({
+            status:   'unhealthy',
+            database: 'disconnected',
+            error:    err.message
+        });
+    }
 });
 
 
